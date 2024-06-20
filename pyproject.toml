@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "aeroCNV: Algorithmic Expression-based Reconstruction of Copy Number Variations using Hidden Markov Models"
 authors = ["sitarapersad <sitara.persad@columbia.edu>"]
 readme = "README.md"
+packages = [
+    { include = "aeroCNV", from = "." },
+    ]
 
 [tool.poetry.dependencies]
 python = "^3.10"
