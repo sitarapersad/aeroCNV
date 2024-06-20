@@ -6,7 +6,7 @@ authors = ["sitarapersad <sitara.persad@columbia.edu>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.10"
 seacells = "^0.3.3"
 picasso = {git = "https://github.com/sitarapersad/picasso"}
 icecream = "^2.1.3"
