@@ -34,9 +34,31 @@ def describe_profiles_A():
     df = pd.read_csv(path2, index_col=[0,1], header=[0,1])
 
     sample_counts = Counter(df.index.get_level_values(0))
-    print(f'There are {sample_counts["Control_Brain_Met_36"]} diploid cells (Control_Primary_5) and {sample_counts["Control_Primary_5"]} normal cells (Control_Brain_Met_36).')
+    print(f'There are {sample_counts["Control_Brain_Met_36"]} diploid cells (Control_Brain_Met_36) and {sample_counts["Control_Primary_5"]} aneuploid cells (Control_Primary_5).')
 
     return cnvs, df
+
+def describe_profiles_B():
+    path = utils.get_absolute_path('CNV_B_Profiles.csv')
+    cnvs = pd.read_csv(path, header=[0, 1], index_col=0)
+    plt.figure(figsize=(5,1))
+    sns.heatmap(cnvs, cmap='coolwarm', vmin=0, center=2)
+    plt.suptitle('Copy Number Profiles for Each Sample')
+    plt.show()
+    plt.close()
+
+    # Apply the function to each row
+    row_counts = cnvs.apply(count_values, axis=1).fillna(0).astype(int)
+    print(f'The number of genes with each copy number in each sample are: \n{row_counts}')
+
+    path2 = utils.get_absolute_path('expression_B_profiles.csv')
+    df = pd.read_csv(path2, index_col=[0,1], header=[0,1])
+
+    sample_counts = Counter(df.index.get_level_values(0))
+    print(f'There are {sample_counts["Control_Brain_Met_31"]} diploid cells (Control_Brain_Met_31) and {sample_counts["Control_Primary_2"]} normal cells (Control_Primary_2).')
+
+    return cnvs, df
+
 
 def one_clone_piecewise_from_real_data(n_tumour_cells, n_normal_cells, n_reference_cells, alteration_widths,
                                        total_genome_length):
@@ -52,6 +74,8 @@ def one_clone_piecewise_from_real_data(n_tumour_cells, n_normal_cells, n_referen
     """
 
     genes, labels = get_genes_and_labels(alteration_widths, total_genome_length)
+
+    print(f'Using {len(genes)} genes for the simulation.')
 
     path = utils.get_absolute_path('expression_A_profiles.csv')
     expression = pd.read_csv(path, index_col=[0, 1], header=[0, 1])
@@ -79,6 +103,10 @@ def one_clone_piecewise_from_real_data(n_tumour_cells, n_normal_cells, n_referen
 
     sampled_expression = expression.loc[sampled_cells]
     reference_expression = expression.loc[reference_cells]
+
+    # Concatenate two levels of the index to get a unique identifier for each cell
+    sampled_expression.index = sampled_expression.index.map(lambda x: '-'.join(map(str, x)))
+    reference_expression.index = reference_expression.index.map(lambda x: '-'.join(map(str, x)))
 
     # Construct the ground truth copy number profiles
     labels = [labels] * len(tumour_cells) + [[2] * len(labels)] * n_normal_cells
@@ -114,6 +142,9 @@ def get_genes_and_labels(alteration_widths, total_genome_length):
 
     # Randomly partition the normal genes into len(alteration_widths) + 1 groups
     normal_genes = list(cnvs.columns[cnvs.loc['Control_Primary_5'] == 2])
+
+    assert len(normal_genes) >= n_normal_genes, 'There are not enough normal genes in the dataset to cover the total genome length'
+
     # Shuffle the order of the gene_lists
     np.random.shuffle(normal_genes)
     # Only keep enough normal genes to cover the total genome length

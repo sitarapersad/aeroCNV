@@ -11,19 +11,18 @@ from . import optimize_likelihood as opt
 from .logging_config import log
 
 class cnvHMM:
-
     """
-    Questions: re-implement renorm? nah
+    Class for a CNV HMM model. This class contains the observations, metadata, and parameters for the model.
+    Copy number predictions can be made after running .fit() on the model, by calling .predict().
     """
-
     def __init__(self,
                  observations,
                  observation_metadata,
                  n_states,
                  diploid_means,
                  clone_transitions = None,
-                 celltype_prior_defaults={'alpha_mean': 1, 'alpha_std': 0.1, 'diploid_std': 0.1},
-                 clone_prior_defaults={'epsilon': 0.1, 'offset': 0},
+                 celltype_prior_defaults={'alpha_mean': 1, 'alpha_std': 0.5, 'diploid_std': 0.1},
+                 clone_prior_defaults={'epsilon': 0.01, 'offset': 0},
                  gexp_percentile_threshold=10,):
         """
         Initialize the CNV HMM model.
@@ -43,6 +42,9 @@ class cnvHMM:
         :param clone_prior_defaults: (dict) Default values for the prior distributions of the clone parameters.
         :param gexp__percentile_threshold: (int) Percentile threshold for filtering lowly expressed genes. Default is 10.
         """
+        observation_metadata = observation_metadata.copy()
+        observations = observations.copy()
+        diploid_means = diploid_means.copy()
 
         observation_metadata.columns = [col.lower() for col in observation_metadata.columns]
         assert 'celltype' in observation_metadata.columns, 'Metadata must contain a column for celltype'
@@ -70,9 +72,9 @@ class cnvHMM:
         celltypes = observation_metadata['celltype'].unique()
         assert set(celltypes) == set(diploid_means.columns), 'Celltypes in metadata must match columns in diploid_means'
 
-        self.observations = observations.astype(int).copy()
-        self.metadata = observation_metadata.copy()
-        self.diploid_means = diploid_means.astype(float).copy()
+        self.observations = observations.astype(int)
+        self.metadata = observation_metadata
+        self.diploid_means = diploid_means.astype(float)
         self.celltype_clone_pairs = {}
 
         self.clean_observations()
@@ -99,6 +101,7 @@ class cnvHMM:
         self.separated_chromosomes = False
         self.celltype_prior_distributions = None
 
+        log.info('𓃢 Welcome to aeroCNV! 𓃢')
         return
 
     def modify_prior_default(self, parameter, value, clone_or_celltype=None):
@@ -677,4 +680,7 @@ class cnvHMM:
             paths = paths[self.observations.columns]
             predictions.append(paths)
         predictions = pd.concat(predictions, axis=0)
+
+        # Reorder the predictions to match the original order of the observations
+        predictions = predictions.loc[self.metadata.index]
         return predictions
