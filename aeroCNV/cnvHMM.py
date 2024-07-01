@@ -174,8 +174,11 @@ class cnvHMM:
         """
         observations = utils.filter_genes(self.observations, self.leg_threshold)
         genes_in_order, genes_not_found = utils.order_genes(observations.columns)
+        self.discarded_genes = []
         if len(genes_not_found) > 0:
-            log.info(f'The following genes were not found in the gene database: {genes_not_found}')
+            log.info(f'Access gene information for {len(genes_not_found)} genes at .discarded_genes')
+            self.discarded_genes = genes_not_found
+
         self.observations = observations[genes_in_order['Gene']]
         # Set the observations columns to a MultiIndex  containing the gene names and the chromosomal locations
         # with the chromosomal locations as the first level and the gene names as the second level

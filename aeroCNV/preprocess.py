@@ -16,8 +16,12 @@ def _normalize_over_genes(expression, diploid_expression, genes):
     cell_metadata['Normalization'] = expression[genes].mean(axis=1)
 
     diploid_expression = diploid_expression.copy()
+    diploid_norm_factor = diploid_expression[genes].mean(axis=1)
+    # Remove cells with 0 norm factor
+    diploid_norm_factor = diploid_norm_factor[diploid_norm_factor > 0]
+    diploid_expression = diploid_expression.loc[diploid_norm_factor.index]
+    diploid_ref = diploid_expression.div(diploid_norm_factor, axis=0)
 
-    diploid_ref = diploid_expression / diploid_expression[genes].mean(axis=1).values[:, None]
     if cell_metadata['Normalization'].min() == 0:
         log.warning('Some cells have a normalization factor of 0')
         # Remove cells with a normalization factor of 0

@@ -22,29 +22,11 @@ def load_genemap():
     """
     Load gene map for sorting genes according to their chromosomal location
     """
-    chr_gene_dict = {ch: set() for ch in np.arange(1, 25)}
-    gene_loc_dict = {}
-    path = get_absolute_path('genePos.txt')
-    try:
-        with open(path) as ifile:
-            for line in ifile:
-                content = line.strip().split(' ')
-                gene, chrom, loc = content[0], content[1][3:], int(content[2])
-                if chrom == 'X':
-                    ch = 23
-                elif chrom == 'Y':
-                    ch = 24
-                else:
-                    ch = int(chrom)
+    path = get_absolute_path('gene_annotations.csv')
+    full_anno = pd.read_csv(path)
+    full_anno.set_index('hgnc_symbol', inplace=True)
 
-                chr_gene_dict[ch].add(gene)
-                gene_loc_dict[gene] = loc
-    except FileNotFoundError:
-        log.error("Gene map at {} doesn't exist".format(path))
-    except ValueError:
-        log.error("Invalid gene / chromosome / location name in Gene map at {}".format(path))
-
-    return chr_gene_dict, gene_loc_dict
+    return full_anno.sort_values(['chromosome_name', 'start_position', 'end_position'])
 
 def order_genes(gene_list):
     """
@@ -53,23 +35,17 @@ def order_genes(gene_list):
     :return genes_sorted: (pd.DataFrame) Sorted genes and corresponding chromosomes,
             genes_not_found: (list) Genes not found in the gene map
     """
+    log.info('Ordering genes according to chromosomal location.')
+    full_anno = load_genemap()
+    genes_not_found = list(set(gene_list) - set(full_anno.index))
+    genes_found = np.intersect1d(gene_list, full_anno.index)
 
-    chr_gene_dict, gene_loc_dict = load_genemap()
+    sorted_genes = full_anno.loc[genes_found].sort_values(['chromosome_name', 'start_position', 'end_position'])
+    chr_level = sorted_genes['chromosome_name']
+    gene_level = sorted_genes.index
 
-    gene_level = []
-    chr_level = []
-    for ch in np.arange(1, 25):
-        genes_unsorted = [gene for gene in gene_list if gene in chr_gene_dict[ch]]
-        if len(genes_unsorted) > 0:
-            positions = np.vectorize(lambda gene: gene_loc_dict[gene])(genes_unsorted)
-            genes_sorted = [list(t) for t in zip(*sorted(zip(positions, genes_unsorted)))][1]
-            gene_level.extend(genes_sorted)
-            chr_level.extend([ch] * len(genes_sorted))
-    genes_not_found = list(set(gene_list) - set(gene_level))
     genes_sorted = pd.DataFrame({'Chromosome': chr_level, 'Gene': gene_level})
-    if len(genes_not_found) > 0:
-        log.info(f'Could not find {len(genes_not_found)} genes in the gene map: {genes_not_found}')
-    log.info(f'Sorted {len(gene_level)} genes according to their chromosomal location')
+    log.info(f'Sorted {len(genes_sorted)} genes in the gene map, {len(genes_not_found)} genes not found.')
     return genes_sorted, genes_not_found
 
 def generate_default_transitions(genes, epsilon=0.1, offset=0):

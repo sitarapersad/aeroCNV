@@ -8,7 +8,7 @@ import os
 from collections import Counter
 
 from . import utils
-
+from . import preprocess as pp
 def count_values(row):
     """
 
@@ -19,7 +19,9 @@ def count_values(row):
 
 def describe_profiles_A():
     path = utils.get_absolute_path('CNV_A_Profiles.csv')
-    cnvs = pd.read_csv(path, header=[0, 1], index_col=0)
+    cnvs = pd.read_csv(path, header=[0], index_col=0)
+    cnvs = pp.remove_cycle_genes(cnvs)
+
     plt.figure(figsize=(5,1))
     sns.heatmap(cnvs, cmap='coolwarm', vmin=0, center=2)
     plt.suptitle('Copy Number Profiles for Each Sample')
@@ -31,7 +33,8 @@ def describe_profiles_A():
     print(f'The number of genes with each copy number in each sample are: \n{row_counts}')
 
     path2 = utils.get_absolute_path('expression_A_profiles.csv')
-    df = pd.read_csv(path2, index_col=[0,1], header=[0,1])
+    df = pd.read_csv(path2, index_col=[0,1], header=[0])
+    df = pp.remove_cycle_genes(df)
 
     sample_counts = Counter(df.index.get_level_values(0))
     print(f'There are {sample_counts["Control_Brain_Met_36"]} diploid cells (Control_Brain_Met_36) and {sample_counts["Control_Primary_5"]} aneuploid cells (Control_Primary_5).')
@@ -40,7 +43,8 @@ def describe_profiles_A():
 
 def describe_profiles_B():
     path = utils.get_absolute_path('CNV_B_Profiles.csv')
-    cnvs = pd.read_csv(path, header=[0, 1], index_col=0)
+    cnvs = pd.read_csv(path, header=[0], index_col=0)
+    cnvs = pp.remove_cycle_genes(cnvs)
     plt.figure(figsize=(5,1))
     sns.heatmap(cnvs, cmap='coolwarm', vmin=0, center=2)
     plt.suptitle('Copy Number Profiles for Each Sample')
@@ -52,8 +56,8 @@ def describe_profiles_B():
     print(f'The number of genes with each copy number in each sample are: \n{row_counts}')
 
     path2 = utils.get_absolute_path('expression_B_profiles.csv')
-    df = pd.read_csv(path2, index_col=[0,1], header=[0,1])
-
+    df = pd.read_csv(path2, index_col=[0,1], header=[0])
+    df = pp.remove_cycle_genes(df)
     sample_counts = Counter(df.index.get_level_values(0))
     print(f'There are {sample_counts["Control_Brain_Met_31"]} diploid cells (Control_Brain_Met_31) and {sample_counts["Control_Primary_2"]} normal cells (Control_Primary_2).')
 
@@ -78,7 +82,8 @@ def one_clone_piecewise_from_real_data(n_tumour_cells, n_normal_cells, n_referen
     print(f'Using {len(genes)} genes for the simulation.')
 
     path = utils.get_absolute_path('expression_A_profiles.csv')
-    expression = pd.read_csv(path, index_col=[0, 1], header=[0, 1])
+    expression = pd.read_csv(path, index_col=[0, 1], header=[0])
+    expression = pp.remove_cycle_genes(expression)
     expression = expression[genes]
 
     sample_counts = Counter(expression.index.get_level_values(0))
@@ -105,8 +110,8 @@ def one_clone_piecewise_from_real_data(n_tumour_cells, n_normal_cells, n_referen
     reference_expression = expression.loc[reference_cells]
 
     # Concatenate two levels of the index to get a unique identifier for each cell
-    sampled_expression.index = sampled_expression.index.map(lambda x: '-'.join(map(str, x)))
-    reference_expression.index = reference_expression.index.map(lambda x: '-'.join(map(str, x)))
+    sampled_expression.index = sampled_expression.index.map(lambda x: '_'.join(map(str, x)))
+    reference_expression.index = reference_expression.index.map(lambda x: '_'.join(map(str, x)))
 
     # Construct the ground truth copy number profiles
     labels = [labels] * len(tumour_cells) + [[2] * len(labels)] * n_normal_cells
@@ -124,7 +129,8 @@ def get_genes_and_labels(alteration_widths, total_genome_length):
     """
 
     path = utils.get_absolute_path('CNV_A_Profiles.csv')
-    cnvs = pd.read_csv(path, header=[0, 1], index_col=0)
+    cnvs = pd.read_csv(path, header=[0], index_col=0)
+    cnvs = pp.remove_cycle_genes(cnvs)
 
     altered_genes = list(cnvs.columns[cnvs.loc['Control_Primary_5'] == 3])
     np.random.shuffle(altered_genes)
