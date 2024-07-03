@@ -53,7 +53,7 @@ class HiddenMarkovModel(object):
         data = data.view(n_samples, 1, n_features)
 
         self.training_data = data
-        self.modifiers = torch.tensor(modifiers.values).view(-1, 1)
+        self.modifiers = torch.tensor(modifiers.values, dtype=torch.float64).view(-1, 1)
 
         # There is 1 fewer steps than there are genes, since we are modeling transitions between genes
         self.n_features = n_features
