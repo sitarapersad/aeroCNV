@@ -23,7 +23,7 @@ class cnvHMM:
                  clone_transitions = None,
                  celltype_prior_defaults={'alpha_mean': 1, 'alpha_std': 0.5, 'diploid_std': 0.1},
                  clone_prior_defaults={'epsilon': 0.01, 'offset': 0},
-                 gexp_percentile_threshold=10,):
+                 gexp_threshold=0.01,):
         """
         Initialize the CNV HMM model.
         :param observations: (pd.DataFrame) Observations of the cells. Rows are cells and columns are genes.
@@ -40,7 +40,8 @@ class cnvHMM:
 
         :param celltype_prior_defaults: (dict) Default values for the prior distributions of the cluster parameters.
         :param clone_prior_defaults: (dict) Default values for the prior distributions of the clone parameters.
-        :param gexp__percentile_threshold: (int) Percentile threshold for filtering lowly expressed genes. Default is 10.
+        :param gexp_percent_threshold: (float) Fraction of cells that must express a gene for it to be included in the
+                                        model.
         """
         observation_metadata = observation_metadata.copy()
         observations = observations.copy()
@@ -64,10 +65,13 @@ class cnvHMM:
         self.n_states = n_states
 
         # Check if gene expresion filtering threshold is an integer or float
-        assert isinstance(gexp_percentile_threshold, (int, float)), (f'Gene expression filtering threshold must be an '
+        assert isinstance(gexp_threshold, (float)), (f'Gene expression filtering threshold must be an '
                                                                       f'integer or float '
-                                                                      f'(not {type(gexp_percentile_threshold)})')
-        self.leg_threshold = gexp_percentile_threshold
+                                                                      f'(not {type(gexp_threshold)})')
+        assert 0 <= gexp_threshold <= 1, (f'Gene expression filtering threshold must be between 0 and 1, not '
+                                            f'{gexp_threshold}')
+
+        self.min_cells_per_gene = gexp_threshold
 
         celltypes = observation_metadata['celltype'].unique()
         assert set(celltypes) == set(diploid_means.columns), 'Celltypes in metadata must match columns in diploid_means'
@@ -100,6 +104,13 @@ class cnvHMM:
         self.celltype_parameters_separated = None
         self.separated_chromosomes = False
         self.celltype_prior_distributions = None
+
+        self._alpha_iters = []
+        self._epsilon_iters = []
+
+        self.transition_NLLs = []
+        self.emission_NLLs = []
+        self.NLLs = []
 
         log.info('𓃢 Welcome to aeroCNV! 𓃢')
         return
@@ -172,7 +183,7 @@ class cnvHMM:
         Clean the observations by removing lowly expressed genes and sorting the genes by chromosomal location.
         :return: None
         """
-        observations = utils.filter_genes(self.observations, self.leg_threshold)
+        observations = utils.filter_genes_by_cell_presence(self.observations, self.min_cells_per_gene)
         genes_in_order, genes_not_found = utils.order_genes(observations.columns)
         self.discarded_genes = []
         if len(genes_not_found) > 0:
@@ -391,7 +402,7 @@ class cnvHMM:
 
     def create_HMM(self, name, celltype, clone):
         """
-        Create an HMM for a specific celltype-clone pair. Initialize the HMM with the name and add the states for that
+        Create an HMM for a spPoissonecific celltype-clone pair. Initialize the HMM with the name and add the states for that
         celltype, the transitions for that clone, and the training data for that celltype-clone pair.
         :param name: (str) Name of the HMM
         :param celltype: (str) Celltype to create the HMM for
@@ -501,7 +512,7 @@ class cnvHMM:
         if clone not in self.transition_matrix_per_clone:
             self.transition_matrix_per_clone[clone] = self._epsilon_to_matrices(clone)
         return self.transition_matrix_per_clone[clone]
-    def __update_transitions(self):
+    def __update_transitions(self, freeze_transitions=False):
         """
         Update the transition probabilities for the model.
         :return:
@@ -511,12 +522,16 @@ class cnvHMM:
         updated_clone_transitions = {}
         clone_expected_transitions = {}
 
+        transition_NLL = 0
         for hmm in self.HMMs:
             F, B, G = self.matrices[hmm.name]
             celltype, clone = hmm.name.split('_')[1:]
             xi = hmm.expected_transitions(F, B)
             clone_expected_transitions[clone] = clone_expected_transitions.get(clone, []) + [xi]
             clone_expected_transitions[clone] = clone_expected_transitions.get(clone, []) + [xi]
+            log_Aij = torch.log(hmm.get_transition_matrix())
+            log_Aij[log_Aij == -np.inf] = -1e5
+            transition_NLL -= (xi * log_Aij).sum()
 
         # Determine which gene is the last gene before a RESET gene; these are a special case where the transition matrix
         # is set to transition to the Reset state (first state) with probability 1
@@ -529,63 +544,66 @@ class cnvHMM:
         # Now we will construct the updated transition matrices for each clone
         transition_to_reset_matrix = torch.zeros((self.n_states + 1, self.n_states + 1))
         transition_to_reset_matrix[:, 0] = 1
+        if not freeze_transitions:
+            for clone in clone_expected_transitions:
+                expected_transitions = torch.stack(clone_expected_transitions[clone], dim=0).sum(axis=0)
+                main_transition = self.clone_transitions[clone]['offset']
 
-        for clone in clone_expected_transitions:
-            expected_transitions = torch.stack(clone_expected_transitions[clone], dim=0).sum(axis=0)
-            main_transition = self.clone_transitions[clone]['offset']
+                clone_transitions = {'Chromosome': [], 'Gene': [], 'epsilon': [], 'offset': []}
+                updated_matrices = []
+                for i, (chr, gene) in enumerate(self.observations_separated.columns[:-1]):
+                    # We add a small pseudo-count so that we don't divide by zero
+                    T = expected_transitions[i] + 1e-5
+                    # We can determine the updated epsilon by counting the expected transitions off the main diagonal and dividing by the total number of transitions
+                    if 'RESET' not in gene:
+                        main_transition = self.clone_transitions[clone]['offset'].loc[(chr, gene)]
+                        total_counts = T.sum()
+                        epsilon = utils._zero_out_diagonal_offsets(T, main_transition).sum() / total_counts
+                        clone_transitions['Chromosome'].append(chr)
+                        clone_transitions['Gene'].append(gene)
+                        clone_transitions['epsilon'].append(epsilon)
+                        clone_transitions['offset'].append(main_transition)
 
-            clone_transitions = {'Chromosome': [], 'Gene': [], 'epsilon': [], 'offset': []}
-            updated_matrices = []
-            for i, (chr, gene) in enumerate(self.observations_separated.columns[:-1]):
-                # We add a small pseudo-count so that we don't divide by zero
-                T = expected_transitions[i] + 1e-15
-                # We can determine the updated epsilon by counting the expected transitions off the main diagonal and dividing by the total number of transitions
-                if 'RESET' not in gene:
-                    main_transition = self.clone_transitions[clone]['offset'].loc[(chr, gene)]
-                    total_counts = T.sum()
-                    epsilon = utils._zero_out_diagonal_offsets(T, main_transition).sum() / total_counts
-                    clone_transitions['Chromosome'].append(chr)
-                    clone_transitions['Gene'].append(gene)
-                    clone_transitions['epsilon'].append(epsilon)
-                    clone_transitions['offset'].append(main_transition)
-
-                    if gene in pre_reset_genes:
-                        updated_matrices.append(transition_to_reset_matrix)
+                        if gene in pre_reset_genes:
+                            updated_matrices.append(transition_to_reset_matrix)
+                        else:
+                            updated_T = utils.create_transition_matrix(self.n_states, epsilon, main_transition)
+                            updated_T = utils._pad_transition_matrix(updated_T, self.n_states)
+                            updated_matrices.append(updated_T)
                     else:
-                        updated_T = utils.create_transition_matrix(self.n_states, epsilon, main_transition)
-                        updated_T = utils._pad_transition_matrix(updated_T, self.n_states)
-                        updated_matrices.append(updated_T)
-                else:
-                    # We don't compute an epsilon for the reset gene; but we want to normalize the expected transitions to get an updated start distribution over other states
-                    updated_matrices.append(T / T.sum(axis=1, keepdim=True))
-            # Add a dummy epsilon and offset for the last gene to maintain consistency
-            (chr, gene) = self.observations_separated.columns[-1]
-            clone_transitions['Chromosome'].append(chr)
-            clone_transitions['Gene'].append(gene)
-            clone_transitions['epsilon'].append(torch.tensor(0))
-            clone_transitions['offset'].append(0)
+                        # We don't compute an epsilon for the reset gene; but we want to normalize the expected transitions to get an updated start distribution over other states
+                        updated_matrices.append(T / T.sum(axis=1, keepdim=True))
+                # Add a dummy epsilon and offset for the last gene to maintain consistency
+                (chr, gene) = self.observations_separated.columns[-1]
+                clone_transitions['Chromosome'].append(chr)
+                clone_transitions['Gene'].append(gene)
+                clone_transitions['epsilon'].append(torch.tensor(0))
+                clone_transitions['offset'].append(0)
 
-            clone_transitions['epsilon'] = torch.stack(clone_transitions['epsilon']).numpy()
-            clone_transitions = pd.DataFrame(clone_transitions).set_index(['Chromosome', 'Gene'])
+                clone_transitions['epsilon'] = torch.stack(clone_transitions['epsilon']).numpy()
+                clone_transitions = pd.DataFrame(clone_transitions).set_index(['Chromosome', 'Gene'])
 
-            assert set(clone_transitions.index) == set(
-                self.observations.columns), 'Epsilon values are not computed for all genes.'
-            assert len(updated_matrices) == len(
-                self.observations_separated.columns) - 1, 'Transition matrices are not computed for all genes.'
+                assert set(clone_transitions.index) == set(
+                    self.observations.columns), 'Epsilon values are not computed for all genes.'
+                assert len(updated_matrices) == len(
+                    self.observations_separated.columns) - 1, 'Transition matrices are not computed for all genes.'
 
-            updated_clone_transitions[clone] = clone_transitions
-            updated_matrices = torch.stack(updated_matrices)
-            self.transition_matrix_per_clone[clone] = updated_matrices
+                updated_clone_transitions[clone] = clone_transitions
+                updated_matrices = torch.stack(updated_matrices)
+                self.transition_matrix_per_clone[clone] = updated_matrices
 
-        updated_clone_transitions = pd.concat(updated_clone_transitions, axis=1)
-        self.clone_transitions = updated_clone_transitions
-        return
+            updated_clone_transitions = pd.concat(updated_clone_transitions, axis=1)
+            self._epsilon_iters.append(updated_clone_transitions)
+            self.clone_transitions = updated_clone_transitions
 
-    def __update_emissions(self,):
+        return transition_NLL
+
+    def __update_emissions(self, freeze_alpha):
 
         celltype_gammas = {}
         celltype_modifiers = {}
         celltype_observations = {}
+        emissions_NLL = 0
         for hmm in self.HMMs:
             celltype, clone = hmm.name.split('_')[1:]
             F, B, gamma = self.matrices[hmm.name]
@@ -608,16 +626,30 @@ class cnvHMM:
             alphas = self.celltype_parameters_separated[celltype]['alpha']
             diploid_means = self.celltype_prior_parameters_separated[celltype]['diploid_mean']
             prior_distributions = self.celltype_prior_parameters_separated[celltype]
+            if freeze_alpha:
+                updated_alphas = alphas
+            else:
+                updated_alphas = opt.update_alphas(alphas, diploid_means, summaries, prior_distributions)
 
-            updated_alphas = opt.update_alphas(alphas, diploid_means, summaries, prior_distributions)
+            emissions_NLL += opt.poisson_NLL(updated_alphas, diploid_means, summaries, prior_distributions)
+
+            self._alpha_iters.append(updated_alphas)
             self.celltype_parameters_separated.loc[:, (celltype, 'alpha')] = updated_alphas
 
         self.celltype_parameters = self.celltype_parameters_separated.loc[self.celltype_parameters.index]
         self.verify_celltype_parameters()
 
-    def converged(self):
-        return False
-        raise NotImplementedError
+        return emissions_NLL
+
+    def converged(self, threshold=1e-3):
+        """
+        Check if the model has converged.
+        :param threshold: (float) Threshold for the change in the negative log likelihood to determine convergence.
+        :return: (bool) True if the model has converged, False otherwise.
+        """
+        if len(self.NLLs) < 2:
+            return False
+        return self.NLLs[-2] - self.NLLs[-1] < threshold
 
     def fit(self, min_iters=10, max_iters=100, freeze_transitions=False, freeze_emissions=False):
         """
@@ -626,6 +658,7 @@ class cnvHMM:
         :param max_iters: (int) Maximum number of iterations to run before stopping. Default is None.
         :param freeze_transitions: (bool) If True, do not update transition probabilities. Default is False.
         :param freeze_emissions: (bool) If True, do not update emission probabilities. Default is False.
+        :param freeze_alpha: (bool) If True, do not update alpha parameters. Default is False.
         :return: None
         """
 
@@ -650,10 +683,12 @@ class cnvHMM:
                 G = hmm.gamma(F,B)
                 self.matrices[hmm.name] = (F, B, G)
 
-            if not freeze_transitions:
-                self.__update_transitions()
-            if not freeze_emissions:
-                self.__update_emissions()
+            transition_NLL = self.__update_transitions(freeze_transitions=freeze_transitions)
+            emissions_NLL = self.__update_emissions(freeze_alpha=freeze_emissions)
+            NLL = transition_NLL + emissions_NLL
+            self.emission_NLLs.append(emissions_NLL)
+            self.transition_NLLs.append(transition_NLL)
+            self.NLLs.append(NLL)
 
             # Create new HMMs with updated parameters
             self.create_HMMs()

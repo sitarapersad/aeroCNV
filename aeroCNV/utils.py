@@ -162,6 +162,17 @@ def filter_genes(expression, leg_threshold=10):
     log.info(f'Removed {len(genes_to_keep) - genes_to_keep.sum()} genes due to low expression.')
     return expression.loc[:, genes_to_keep]
 
+def filter_genes_by_cell_presence(expression, threshold=0.1):
+    """
+    Filter genes by the fraction of cells in which they are expressed
+    :param expression: (pd.DataFrame) Gene expression matrix
+    :param threshold: (float) Fraction of cells in which a gene must be expressed to be kept
+    :return: (pd.DataFrame) Filtered gene expression matrix
+    """
+    expressed = (expression>0)
+    fraction_expressed = expressed.mean()
+    return expression.loc[:, fraction_expressed > threshold]
+
 def _separate_chromosomes(df, reset_character=-1):
     """
     Modify data and transition matrix to insert a reset state at the beginning of each chromosome (so that
