@@ -39,7 +39,14 @@ def compute_Poisson_summaries(observations, gamma, modifiers):
     gamma = gamma[:, 1:, :]
     n_states = gamma.shape[1]
     x = observations.clone().double()
-    modifiers = torch.DoubleTensor(modifiers).view(-1,1,1).repeat(1,n_states,1)
+
+    # Ensure that modifiers are in double precision and properly detached
+    if isinstance(modifiers, torch.Tensor):
+        modifiers = modifiers.clone().detach().to(dtype=torch.float64)
+    else:
+        modifiers = torch.tensor(modifiers, dtype=torch.float64)
+
+    modifiers = modifiers.view(-1,1,1).repeat(1,n_states,1)
 
     # --- Summary[0][k] = k * t array containing sum_{cells} gamma[cell,k,t]*x_t*log(mods)
     summ_0 = torch.mul(torch.mul(x, gamma), torch.log(modifiers)).sum(0)
