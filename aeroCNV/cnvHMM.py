@@ -618,6 +618,7 @@ class cnvHMM:
         for celltype in celltype_gammas:
             gammas = torch.cat(celltype_gammas[celltype])
             modifiers = torch.cat(celltype_modifiers[celltype])
+            modifiers = torch.tensor(modifiers, dtype=torch.float64)
             data = torch.cat(celltype_observations[celltype])
 
             # Update the emission parameters diploid_mean and alpha. We need to optimize the NLL analytically with respect to alpha
