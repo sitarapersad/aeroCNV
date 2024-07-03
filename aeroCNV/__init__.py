@@ -1,3 +1,5 @@
+import numpy as np
+
 from .logging_config import setup_logger
 import logging
 

@@ -111,17 +111,11 @@ def poisson_NLL(alphas, diploid_means, summaries, prior_distributions):
 
     # Incorporate prior distributions on the normalized diploid means and alpha weights
     # Compute the log probability of the prior distributions
-    empirical_diploid_mean = torch.tensor(prior_distributions['diploid_mean'].values)
-    empirical_diploid_std = torch.tensor(prior_distributions['diploid_std'].values)
-
     prior_alpha_mean = torch.tensor(prior_distributions['alpha_mean'].values)
     prior_alpha_std = torch.tensor(prior_distributions['alpha_std'].values)
-
-    diploid_mean_dist = torch.distributions.Normal(empirical_diploid_mean, empirical_diploid_std)
     alpha_dist = torch.distributions.Normal(prior_alpha_mean, prior_alpha_std)
 
     alpha_prior_NLL = -torch.sum(alpha_dist.log_prob(torch.tensor(alphas)))
-    NLL += -torch.sum(diploid_mean_dist.log_prob(torch.tensor(diploid_means)))
     NLL += alpha_prior_NLL
 
     # print('alpha_NLL', -torch.sum(alpha_dist.log_prob(torch.tensor(alphas))))
@@ -193,26 +187,6 @@ def update_alphas(initial_alphas, diploid_means, summaries, prior_distributions,
                                                        bounds)
     log.debug(f'Optimized alpha weights in {(time.time() - start_time):.2f} seconds')
     return optimized_alphas
-
-# def update_alphas(initial_alphas, diploid_means, summaries, prior_distributions, bounds=(0.1, 2)):
-#     """
-#     Use scipy.optimize.minimize to update the alpha weights for the Poisson distribution.
-#     :param initial_alphas: (np.ndarray) - Initial alpha weights, shape (n_genes,1)
-#     :param summaries: (list) - List of summaries for the Poisson distribution as computed by compute_Poisson_summaries
-#     :param prior_distributions: (Dict) - Dictionary containing the prior distributions for the Poisson means and alpha weights
-#         as torch.Distributions
-#     :param bounds: (Tuple) - Bounds for the alpha weights. Default is (-1,10)
-#     :return:
-#     """
-#     log.debug('Optimizing alpha weights...')
-#     args = (diploid_means, summaries, prior_distributions)
-#
-#     bounds = [bounds] * len(initial_alphas)
-#     start_time = time.time()
-#     result = scipy.optimize.minimize(poisson_NLL, initial_alphas, args=args, method='L-BFGS-B', bounds=bounds)
-#     optimized_alpha = result.x
-#     log.debug(f'Optimized alpha weights in {(time.time() - start_time):.2f} seconds')
-#     return optimized_alpha
 
 
 def update_diploid_means(initial_means, summaries, prior_distributions):
