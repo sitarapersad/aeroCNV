@@ -157,7 +157,7 @@ class OurPoisson(Distribution):
     :param zero_inflation_prob: (float or Tensor) Probability of zero inflation
     """
 
-    def __init__(self, mean, zero_inflation_prob=0.2):
+    def __init__(self, mean, zero_inflation_prob=0.01):
         self.length = len(mean)
 
         if isinstance(mean, np.ndarray) or isinstance(mean, list):

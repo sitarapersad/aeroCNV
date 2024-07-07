@@ -81,7 +81,7 @@ def poisson_NLL(alphas, diploid_means, summaries, prior_distributions):
         μ^(k) is the mean of the Poisson distribution in state k
         modifier_c is the modifier for cell c
         N is the number of cells
-
+v
     We also incorporate prior distributions on the normalized diploid means, from which the Poisson means are derived
     and on the alpha weights.
 

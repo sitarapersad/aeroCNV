@@ -13,6 +13,7 @@ python = "^3.10"
 picasso = {git = "https://github.com/sitarapersad/picasso"}
 icecream = "^2.1.3"
 infercnvpy = "^0.4.5"
+seacells = "^0.3.3"
 
 
 [build-system]

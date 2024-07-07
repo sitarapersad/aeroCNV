@@ -722,3 +722,31 @@ class cnvHMM:
         # Reorder the predictions to match the original order of the observations
         predictions = predictions.loc[self.metadata.index]
         return predictions
+
+    def infer_transition_priors(self):
+        """
+        Infer the transition priors for the model.
+        :return: (pd.DataFrame) Inferred transition priors for the model.
+        """
+        viterbi = self.predict()
+        phylogenetic_transition_priors = pd.DataFrame(index=self.clone_transitions.index,
+                                                      columns=self.clone_transitions.columns)
+        for clone in self.get_clones():
+            # Get cells in clone
+            cells = self.metadata.query('clone == @clone').index
+            alterations = pd.DataFrame(np.diff(viterbi.loc[cells]), columns=viterbi.columns[:-1],
+                                       index=cells)
+
+            # Get the modal alteration per column and the proportion of cells that have that alteration
+            modal_alterations = alterations.mode(axis=0).iloc[0]
+            # Calculate the proportion of cells that have the modal alteration
+            modal_proportion = alterations.apply(lambda x: (x == modal_alterations[x.name]).mean())
+            # Add a small value to avoid zero probabilities in transitions
+            off_diagonal_proportion = 1 - modal_proportion + 1e-3
+            # We must add one last dummy transition from the last gene
+            epsilon = list(off_diagonal_proportion.values) + [0]
+            offset = list(modal_alterations.values) + [0]
+
+            phylogenetic_transition_priors[(clone, 'offset')] = np.array(offset).astype(int)
+            phylogenetic_transition_priors[(clone, 'epsilon')] = epsilon
+        return phylogenetic_transition_priors

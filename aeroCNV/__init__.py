@@ -21,3 +21,6 @@ from .dynamicHMM import HiddenMarkovModel as HMM
 from . import utils
 from . import optimize_likelihood as opt
 from . import preprocess as pp
+from . import aggregator as agg
+
+
